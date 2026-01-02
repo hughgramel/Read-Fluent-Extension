@@ -10,8 +10,7 @@
   "host_permissions": [
     "https://www.youtube.com/*",
     "https://youtube.com/*",
-    "https://api.cobalt.tools/*",
-    "https://*.cobalt.tools/*"
+    "https://*/*"
   ],
   "action": {
     "default_popup": "popup.html",

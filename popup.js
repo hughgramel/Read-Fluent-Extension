@@ -14,8 +14,17 @@ let currentAudioUrl = null;
 let currentVideoInfo = null;
 
 // Initialize
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   loadSavedAudios();
+
+  // Test service worker connection
+  try {
+    const ping = await chrome.runtime.sendMessage({ action: 'ping' });
+    console.log('Service worker ping:', ping);
+  } catch (e) {
+    console.error('Service worker not responding:', e);
+  }
+
   checkCurrentTab();
 });
 

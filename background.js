@@ -1,28 +1,29 @@
-// Background service worker - handles API requests to avoid CORS issues
-
-chrome.runtime.onInstalled.addListener(() => {
-  console.log('Read Fluent Extension installed');
-});
+// Background service worker
+console.log('Background script loaded!');
 
 // Listen for messages from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  console.log('Background received message:', request.action);
+  console.log('Message received:', request);
 
   if (request.action === 'downloadAudio') {
-    // Handle async operation
-    handleDownload(request.url, sendResponse);
-    return true; // CRITICAL: keeps the message channel open
+    fetchAudio(request.url).then(sendResponse);
+    return true; // Keep channel open
+  }
+
+  if (request.action === 'ping') {
+    sendResponse({ pong: true });
+    return false;
   }
 
   return false;
 });
 
-async function handleDownload(videoUrl, sendResponse) {
-  try {
-    console.log('Starting download for:', videoUrl);
+async function fetchAudio(videoUrl) {
+  console.log('Fetching audio for:', videoUrl);
 
-    // Use cobalt.tools API
-    const response = await fetch('https://api.cobalt.tools/api/json', {
+  try {
+    // Try cobalt API
+    const apiResponse = await fetch('https://co.wuk.sh/api/json', {
       method: 'POST',
       headers: {
         'Accept': 'application/json',
@@ -30,77 +31,57 @@ async function handleDownload(videoUrl, sendResponse) {
       },
       body: JSON.stringify({
         url: videoUrl,
-        vCodec: 'h264',
-        vQuality: '720',
         aFormat: 'mp3',
-        isAudioOnly: true,
-        disableMetadata: false
+        isAudioOnly: true
       })
     });
 
-    console.log('API response status:', response.status);
+    console.log('API status:', apiResponse.status);
 
-    if (!response.ok) {
-      const text = await response.text();
-      console.error('API error response:', text);
-      sendResponse({ success: false, error: `API request failed: ${response.status}` });
-      return;
+    if (!apiResponse.ok) {
+      return { success: false, error: `API error: ${apiResponse.status}` };
     }
 
-    const data = await response.json();
-    console.log('API response data:', data);
+    const data = await apiResponse.json();
+    console.log('API data:', data);
 
     if (data.status === 'error') {
-      sendResponse({ success: false, error: data.text || 'Failed to get audio URL' });
-      return;
+      return { success: false, error: data.text || 'API returned error' };
     }
 
-    let audioUrl = null;
-
-    if (data.status === 'redirect' || data.status === 'stream') {
-      audioUrl = data.url;
-    } else if (data.status === 'picker') {
-      const audioOption = data.picker.find(p => p.type === 'audio') || data.picker[0];
-      if (audioOption && audioOption.url) {
-        audioUrl = audioOption.url;
-      }
-    }
-
+    const audioUrl = data.url;
     if (!audioUrl) {
-      sendResponse({ success: false, error: 'No audio URL found in response' });
-      return;
+      return { success: false, error: 'No audio URL in response' };
     }
 
-    console.log('Fetching audio from:', audioUrl);
+    console.log('Downloading from:', audioUrl);
 
-    // Fetch the actual audio file
     const audioResponse = await fetch(audioUrl);
     if (!audioResponse.ok) {
-      sendResponse({ success: false, error: 'Failed to download audio file' });
-      return;
+      return { success: false, error: 'Failed to fetch audio file' };
     }
 
-    const audioBlob = await audioResponse.blob();
-    console.log('Audio blob size:', audioBlob.size);
+    const blob = await audioResponse.blob();
+    console.log('Got blob, size:', blob.size);
 
-    // Convert blob to base64 for sending to popup
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const base64 = reader.result.split(',')[1];
-      console.log('Sending audio data, length:', base64.length);
-      sendResponse({
-        success: true,
-        audioData: base64,
-        mimeType: audioBlob.type || 'audio/mpeg'
-      });
-    };
-    reader.onerror = () => {
-      sendResponse({ success: false, error: 'Failed to encode audio' });
-    };
-    reader.readAsDataURL(audioBlob);
+    // Convert to base64
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        resolve({
+          success: true,
+          audioData: reader.result.split(',')[1],
+          mimeType: blob.type || 'audio/mpeg'
+        });
+      };
+      reader.onerror = () => {
+        resolve({ success: false, error: 'Failed to read audio' });
+      };
+      reader.readAsDataURL(blob);
+    });
 
-  } catch (error) {
-    console.error('Download error:', error);
-    sendResponse({ success: false, error: error.message });
+  } catch (err) {
+    console.error('Error:', err);
+    return { success: false, error: err.message };
   }
 }
