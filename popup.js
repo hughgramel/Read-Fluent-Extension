@@ -10,26 +10,16 @@ const audioList = document.getElementById('audioList');
 
 let currentAudioBlob = null;
 let currentAudioUrl = null;
+let mediaRecorder = null;
+let audioChunks = [];
+let captureStream = null;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
   loadSavedAudios();
-  checkRecordingStatus();
 });
 
-// Check if we're currently recording
-async function checkRecordingStatus() {
-  try {
-    const response = await chrome.runtime.sendMessage({ action: 'getStatus' });
-    if (response && response.isRecording) {
-      setRecordingState(true);
-    }
-  } catch (error) {
-    console.log('Could not get status:', error);
-  }
-}
-
-// Capture button click
+// Capture button click - tabCapture must be called from popup with user gesture
 captureBtn.addEventListener('click', async () => {
   try {
     setStatus('Starting capture...', '');
@@ -42,18 +32,56 @@ captureBtn.addEventListener('click', async () => {
       return;
     }
 
-    // Send message to background to start capture
-    const response = await chrome.runtime.sendMessage({
-      action: 'startCapture',
-      tabId: tab.id
+    // Use tabCapture directly in popup (requires user gesture)
+    captureStream = await new Promise((resolve, reject) => {
+      chrome.tabCapture.capture(
+        { audio: true, video: false },
+        (stream) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+          } else if (!stream) {
+            reject(new Error('Failed to capture tab audio'));
+          } else {
+            resolve(stream);
+          }
+        }
+      );
     });
 
-    if (response && response.success) {
-      setRecordingState(true);
-      setStatus('Recording... Click Stop when done', 'recording');
-    } else {
-      setStatus(response?.error || 'Failed to start capture', 'error');
+    // Set up media recorder
+    audioChunks = [];
+
+    // Try different mime types for compatibility
+    const mimeTypes = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/ogg;codecs=opus',
+      'audio/mp4'
+    ];
+
+    let selectedMimeType = '';
+    for (const mimeType of mimeTypes) {
+      if (MediaRecorder.isTypeSupported(mimeType)) {
+        selectedMimeType = mimeType;
+        break;
+      }
     }
+
+    mediaRecorder = new MediaRecorder(captureStream, {
+      mimeType: selectedMimeType || undefined
+    });
+
+    mediaRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        audioChunks.push(event.data);
+      }
+    };
+
+    mediaRecorder.start(1000); // Collect data every second
+    setRecordingState(true);
+    setStatus('Recording... Click Stop when done', 'recording');
+
+    console.log('Recording started with mime type:', selectedMimeType);
   } catch (error) {
     console.error('Capture error:', error);
     setStatus('Error: ' + error.message, 'error');
@@ -63,39 +91,42 @@ captureBtn.addEventListener('click', async () => {
 // Stop button click
 stopBtn.addEventListener('click', async () => {
   try {
+    if (!mediaRecorder) {
+      setStatus('Not recording', 'error');
+      return;
+    }
+
     setStatus('Stopping capture...', '');
 
-    const response = await chrome.runtime.sendMessage({ action: 'stopCapture' });
-
-    if (response && response.success) {
-      setRecordingState(false);
-
-      if (response.audioData) {
-        // Convert base64 to blob
-        const byteCharacters = atob(response.audioData);
-        const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-          byteNumbers[i] = byteCharacters.charCodeAt(i);
-        }
-        const byteArray = new Uint8Array(byteNumbers);
-        currentAudioBlob = new Blob([byteArray], { type: 'audio/webm' });
-
-        // Create URL and set audio source
-        if (currentAudioUrl) {
-          URL.revokeObjectURL(currentAudioUrl);
-        }
-        currentAudioUrl = URL.createObjectURL(currentAudioBlob);
-        audioEl.src = currentAudioUrl;
-
-        // Show audio player
-        audioPlayer.classList.remove('hidden');
-        setStatus('Audio captured successfully!', 'success');
-      } else {
-        setStatus('No audio data received', 'error');
+    mediaRecorder.onstop = () => {
+      // Stop all tracks
+      if (captureStream) {
+        captureStream.getTracks().forEach(track => track.stop());
+        captureStream = null;
       }
-    } else {
-      setStatus(response?.error || 'Failed to stop capture', 'error');
-    }
+
+      // Combine audio chunks into a single blob
+      const mimeType = mediaRecorder.mimeType || 'audio/webm';
+      currentAudioBlob = new Blob(audioChunks, { type: mimeType });
+      audioChunks = [];
+
+      // Create URL and set audio source
+      if (currentAudioUrl) {
+        URL.revokeObjectURL(currentAudioUrl);
+      }
+      currentAudioUrl = URL.createObjectURL(currentAudioBlob);
+      audioEl.src = currentAudioUrl;
+
+      // Show audio player
+      audioPlayer.classList.remove('hidden');
+      setStatus('Audio captured successfully!', 'success');
+      setRecordingState(false);
+      mediaRecorder = null;
+
+      console.log('Recording stopped, audio size:', currentAudioBlob.size);
+    };
+
+    mediaRecorder.stop();
   } catch (error) {
     console.error('Stop error:', error);
     setStatus('Error: ' + error.message, 'error');
@@ -108,7 +139,9 @@ downloadBtn.addEventListener('click', () => {
   if (!currentAudioBlob) return;
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const filename = `youtube-audio-${timestamp}.webm`;
+  const extension = currentAudioBlob.type.includes('webm') ? 'webm' :
+                    currentAudioBlob.type.includes('ogg') ? 'ogg' : 'mp4';
+  const filename = `youtube-audio-${timestamp}.${extension}`;
 
   const url = URL.createObjectURL(currentAudioBlob);
   const a = document.createElement('a');
@@ -150,6 +183,7 @@ async function saveAudio(filename, blob) {
         id: Date.now(),
         filename: filename,
         data: base64,
+        type: blob.type,
         date: new Date().toISOString()
       });
 
@@ -217,7 +251,7 @@ async function playSavedAudio(id) {
         byteNumbers[i] = byteCharacters.charCodeAt(i);
       }
       const byteArray = new Uint8Array(byteNumbers);
-      const blob = new Blob([byteArray], { type: 'audio/webm' });
+      const blob = new Blob([byteArray], { type: audio.type || 'audio/webm' });
 
       if (currentAudioUrl) {
         URL.revokeObjectURL(currentAudioUrl);
