@@ -1,13 +1,13 @@
 # Read Fluent Extension
 
-A Chrome extension that captures audio from YouTube videos for language learning purposes.
+A Chrome extension that downloads audio from YouTube videos for language learning purposes.
 
 ## Features
 
-- Capture audio from YouTube videos using tab capture
-- Play captured audio directly in the extension popup
-- Download captured audio as WebM files
-- Save and manage multiple recordings (up to 5)
+- Download complete audio from any YouTube video
+- Play downloaded audio directly in the extension popup
+- Save audio to your device as MP3 files
+- Store and manage multiple audio files (up to 5)
 
 ## Installation
 
@@ -20,18 +20,14 @@ A Chrome extension that captures audio from YouTube videos for language learning
 
 1. Navigate to a YouTube video
 2. Click the Read Fluent extension icon
-3. Click "Capture Audio" to start recording
-4. The video audio will be captured in real-time
-5. Click "Stop Recording" when done
-6. Use the built-in player to listen to the captured audio
-7. Download the audio or save it for later
+3. Click "Download Audio" to fetch the complete audio
+4. Use the built-in player to listen to the audio
+5. Click "Save to Device" to download as MP3
 
 ## Permissions
 
-- `activeTab`: Access the current tab for capturing audio
-- `tabCapture`: Capture audio from browser tabs
-- `storage`: Save captured audio recordings locally
-- `scripting`: Inject content scripts on YouTube pages
+- `activeTab`: Access the current tab URL
+- `storage`: Save audio files locally
 
 ## Development
 
@@ -42,9 +38,8 @@ read-fluent-extension/
 ├── manifest.json      # Chrome extension manifest
 ├── popup.html         # Extension popup UI
 ├── popup.css          # Popup styles
-├── popup.js           # Popup logic
-├── background.js      # Service worker for audio capture
-├── content.js         # Content script for YouTube pages
+├── popup.js           # Popup logic with download functionality
+├── background.js      # Service worker
 └── icons/             # Extension icons
 ```
 
@@ -56,7 +51,6 @@ No build step required. The extension can be loaded directly in Chrome.
 
 - Integration with OpenAI API for transcription
 - Support for other video platforms
-- Audio trimming and editing
 - Transcript display and sync
 
 ## License

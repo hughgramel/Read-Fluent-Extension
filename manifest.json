@@ -2,16 +2,16 @@
   "manifest_version": 3,
   "name": "Read Fluent Extension",
   "version": "1.0.0",
-  "description": "Capture and play YouTube audio for language learning",
+  "description": "Download and play YouTube audio for language learning",
   "permissions": [
     "activeTab",
-    "storage",
-    "scripting",
-    "tabCapture"
+    "storage"
   ],
   "host_permissions": [
     "https://www.youtube.com/*",
-    "https://youtube.com/*"
+    "https://youtube.com/*",
+    "https://api.cobalt.tools/*",
+    "https://*.cobalt.tools/*"
   ],
   "action": {
     "default_popup": "popup.html",
@@ -24,12 +24,6 @@
   "background": {
     "service_worker": "background.js"
   },
-  "content_scripts": [
-    {
-      "matches": ["https://www.youtube.com/*", "https://youtube.com/*"],
-      "js": ["content.js"]
-    }
-  ],
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",

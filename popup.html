@@ -10,25 +10,26 @@
   <div class="container">
     <h1>Read Fluent</h1>
 
+    <div id="videoInfo" class="video-info hidden">
+      <div id="videoTitle" class="video-title"></div>
+    </div>
+
     <div id="status" class="status">
-      Ready to capture audio
+      Navigate to a YouTube video
     </div>
 
     <div class="controls">
-      <button id="captureBtn" class="btn btn-primary">
-        Capture Audio
-      </button>
-      <button id="stopBtn" class="btn btn-danger" disabled>
-        Stop Recording
+      <button id="downloadBtn" class="btn btn-primary" disabled>
+        Download Audio
       </button>
     </div>
 
     <div id="audioPlayer" class="audio-player hidden">
-      <h3>Captured Audio</h3>
+      <h3>Downloaded Audio</h3>
       <audio id="audio" controls></audio>
       <div class="audio-actions">
-        <button id="downloadBtn" class="btn btn-secondary">
-          Download Audio
+        <button id="saveBtn" class="btn btn-secondary">
+          Save to Device
         </button>
         <button id="clearBtn" class="btn btn-secondary">
           Clear
@@ -37,7 +38,7 @@
     </div>
 
     <div id="savedAudios" class="saved-audios">
-      <h3>Saved Recordings</h3>
+      <h3>Saved Audio</h3>
       <div id="audioList"></div>
     </div>
   </div>

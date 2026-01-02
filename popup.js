@@ -1,114 +1,110 @@
 // DOM Elements
-const captureBtn = document.getElementById('captureBtn');
-const stopBtn = document.getElementById('stopBtn');
+const downloadBtn = document.getElementById('downloadBtn');
 const statusEl = document.getElementById('status');
+const videoInfoEl = document.getElementById('videoInfo');
+const videoTitleEl = document.getElementById('videoTitle');
 const audioPlayer = document.getElementById('audioPlayer');
 const audioEl = document.getElementById('audio');
-const downloadBtn = document.getElementById('downloadBtn');
+const saveBtn = document.getElementById('saveBtn');
 const clearBtn = document.getElementById('clearBtn');
 const audioList = document.getElementById('audioList');
 
 let currentAudioBlob = null;
 let currentAudioUrl = null;
-let mediaRecorder = null;
-let audioChunks = [];
-let captureStream = null;
+let currentVideoInfo = null;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
   loadSavedAudios();
+  checkCurrentTab();
 });
 
-// Capture button click - tabCapture must be called from popup with user gesture
-captureBtn.addEventListener('click', async () => {
+// Check if we're on a YouTube video page
+async function checkCurrentTab() {
   try {
-    setStatus('Starting capture...', '');
-
-    // Get current tab
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-    if (!tab.url.includes('youtube.com')) {
-      setStatus('Please navigate to a YouTube video first', 'error');
+    if (!tab.url || !tab.url.includes('youtube.com/watch')) {
+      setStatus('Navigate to a YouTube video', '');
+      downloadBtn.disabled = true;
       return;
     }
 
-    // Use tabCapture directly in popup (requires user gesture)
-    captureStream = await new Promise((resolve, reject) => {
-      chrome.tabCapture.capture(
-        { audio: true, video: false },
-        (stream) => {
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-          } else if (!stream) {
-            reject(new Error('Failed to capture tab audio'));
-          } else {
-            resolve(stream);
-          }
-        }
-      );
-    });
+    // Extract video ID from URL
+    const url = new URL(tab.url);
+    const videoId = url.searchParams.get('v');
 
-    // Set up media recorder
-    audioChunks = [];
-
-    // Try different mime types for compatibility
-    const mimeTypes = [
-      'audio/webm;codecs=opus',
-      'audio/webm',
-      'audio/ogg;codecs=opus',
-      'audio/mp4'
-    ];
-
-    let selectedMimeType = '';
-    for (const mimeType of mimeTypes) {
-      if (MediaRecorder.isTypeSupported(mimeType)) {
-        selectedMimeType = mimeType;
-        break;
-      }
+    if (!videoId) {
+      setStatus('Could not find video ID', 'error');
+      downloadBtn.disabled = true;
+      return;
     }
 
-    mediaRecorder = new MediaRecorder(captureStream, {
-      mimeType: selectedMimeType || undefined
-    });
-
-    mediaRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0) {
-        audioChunks.push(event.data);
-      }
+    // Get video title from the tab
+    currentVideoInfo = {
+      videoId: videoId,
+      url: tab.url,
+      title: tab.title.replace(' - YouTube', '').trim()
     };
 
-    mediaRecorder.start(1000); // Collect data every second
-    setRecordingState(true);
-    setStatus('Recording... Click Stop when done', 'recording');
+    // Show video info
+    videoTitleEl.textContent = currentVideoInfo.title;
+    videoInfoEl.classList.remove('hidden');
 
-    console.log('Recording started with mime type:', selectedMimeType);
+    setStatus('Ready to download audio', 'success');
+    downloadBtn.disabled = false;
+
   } catch (error) {
-    console.error('Capture error:', error);
-    setStatus('Error: ' + error.message, 'error');
+    console.error('Tab check error:', error);
+    setStatus('Error checking tab', 'error');
   }
-});
+}
 
-// Stop button click
-stopBtn.addEventListener('click', async () => {
+// Download button click
+downloadBtn.addEventListener('click', async () => {
+  if (!currentVideoInfo) {
+    setStatus('No video detected', 'error');
+    return;
+  }
+
   try {
-    if (!mediaRecorder) {
-      setStatus('Not recording', 'error');
-      return;
+    downloadBtn.disabled = true;
+    setStatus('Downloading audio...', 'loading');
+
+    // Use cobalt.tools API to get audio
+    const response = await fetch('https://api.cobalt.tools/api/json', {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        url: currentVideoInfo.url,
+        vCodec: 'h264',
+        vQuality: '720',
+        aFormat: 'mp3',
+        isAudioOnly: true,
+        disableMetadata: false
+      })
+    });
+
+    const data = await response.json();
+
+    if (data.status === 'error') {
+      throw new Error(data.text || 'Failed to get audio URL');
     }
 
-    setStatus('Stopping capture...', '');
+    if (data.status === 'redirect' || data.status === 'stream') {
+      // Fetch the audio file
+      const audioUrl = data.url;
+      setStatus('Fetching audio file...', 'loading');
 
-    mediaRecorder.onstop = () => {
-      // Stop all tracks
-      if (captureStream) {
-        captureStream.getTracks().forEach(track => track.stop());
-        captureStream = null;
+      const audioResponse = await fetch(audioUrl);
+      if (!audioResponse.ok) {
+        throw new Error('Failed to download audio file');
       }
 
-      // Combine audio chunks into a single blob
-      const mimeType = mediaRecorder.mimeType || 'audio/webm';
-      currentAudioBlob = new Blob(audioChunks, { type: mimeType });
-      audioChunks = [];
+      currentAudioBlob = await audioResponse.blob();
 
       // Create URL and set audio source
       if (currentAudioUrl) {
@@ -119,30 +115,51 @@ stopBtn.addEventListener('click', async () => {
 
       // Show audio player
       audioPlayer.classList.remove('hidden');
-      setStatus('Audio captured successfully!', 'success');
-      setRecordingState(false);
-      mediaRecorder = null;
+      setStatus('Audio ready to play!', 'success');
 
-      console.log('Recording stopped, audio size:', currentAudioBlob.size);
-    };
+    } else if (data.status === 'picker') {
+      // Multiple formats available, use the first audio one
+      const audioOption = data.picker.find(p => p.type === 'audio') || data.picker[0];
+      if (audioOption && audioOption.url) {
+        setStatus('Fetching audio file...', 'loading');
+        const audioResponse = await fetch(audioOption.url);
+        currentAudioBlob = await audioResponse.blob();
 
-    mediaRecorder.stop();
+        if (currentAudioUrl) {
+          URL.revokeObjectURL(currentAudioUrl);
+        }
+        currentAudioUrl = URL.createObjectURL(currentAudioBlob);
+        audioEl.src = currentAudioUrl;
+
+        audioPlayer.classList.remove('hidden');
+        setStatus('Audio ready to play!', 'success');
+      } else {
+        throw new Error('No audio format available');
+      }
+    } else {
+      throw new Error('Unexpected response from server');
+    }
+
   } catch (error) {
-    console.error('Stop error:', error);
+    console.error('Download error:', error);
     setStatus('Error: ' + error.message, 'error');
-    setRecordingState(false);
+  } finally {
+    downloadBtn.disabled = false;
   }
 });
 
-// Download button click
-downloadBtn.addEventListener('click', () => {
-  if (!currentAudioBlob) return;
+// Save button click
+saveBtn.addEventListener('click', () => {
+  if (!currentAudioBlob || !currentVideoInfo) return;
 
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const extension = currentAudioBlob.type.includes('webm') ? 'webm' :
-                    currentAudioBlob.type.includes('ogg') ? 'ogg' : 'mp4';
-  const filename = `youtube-audio-${timestamp}.${extension}`;
+  // Clean filename
+  const cleanTitle = currentVideoInfo.title
+    .replace(/[^a-zA-Z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .substring(0, 50);
+  const filename = `${cleanTitle}.mp3`;
 
+  // Trigger download
   const url = URL.createObjectURL(currentAudioBlob);
   const a = document.createElement('a');
   a.href = url;
@@ -150,8 +167,8 @@ downloadBtn.addEventListener('click', () => {
   a.click();
   URL.revokeObjectURL(url);
 
-  // Save to storage
-  saveAudio(filename, currentAudioBlob);
+  // Save to extension storage
+  saveAudioToStorage(filename, currentAudioBlob);
 });
 
 // Clear button click
@@ -163,27 +180,25 @@ clearBtn.addEventListener('click', () => {
   currentAudioUrl = null;
   audioEl.src = '';
   audioPlayer.classList.add('hidden');
-  setStatus('Ready to capture audio', '');
+  setStatus('Ready to download audio', 'success');
 });
 
 // Save audio to chrome storage
-async function saveAudio(filename, blob) {
+async function saveAudioToStorage(filename, blob) {
   try {
-    // Convert blob to base64
     const reader = new FileReader();
     reader.onload = async () => {
       const base64 = reader.result.split(',')[1];
 
-      // Get existing audios
       const result = await chrome.storage.local.get(['savedAudios']);
       const savedAudios = result.savedAudios || [];
 
-      // Add new audio (keep only last 5 to save space)
       savedAudios.unshift({
         id: Date.now(),
         filename: filename,
         data: base64,
         type: blob.type,
+        videoId: currentVideoInfo?.videoId,
         date: new Date().toISOString()
       });
 
@@ -208,7 +223,7 @@ async function loadSavedAudios() {
     const savedAudios = result.savedAudios || [];
 
     if (savedAudios.length === 0) {
-      audioList.innerHTML = '<div class="empty-state">No saved recordings yet</div>';
+      audioList.innerHTML = '<div class="empty-state">No saved audio yet</div>';
       return;
     }
 
@@ -220,7 +235,7 @@ async function loadSavedAudios() {
         </div>
         <div class="audio-item-actions">
           <button class="btn btn-primary play-btn" data-id="${audio.id}">Play</button>
-          <button class="btn btn-danger delete-btn" data-id="${audio.id}">Delete</button>
+          <button class="btn btn-danger delete-btn" data-id="${audio.id}">X</button>
         </div>
       </div>
     `).join('');
@@ -251,7 +266,7 @@ async function playSavedAudio(id) {
         byteNumbers[i] = byteCharacters.charCodeAt(i);
       }
       const byteArray = new Uint8Array(byteNumbers);
-      const blob = new Blob([byteArray], { type: audio.type || 'audio/webm' });
+      const blob = new Blob([byteArray], { type: audio.type || 'audio/mpeg' });
 
       if (currentAudioUrl) {
         URL.revokeObjectURL(currentAudioUrl);
@@ -280,13 +295,8 @@ async function deleteSavedAudio(id) {
   }
 }
 
-// Helper functions
+// Helper function
 function setStatus(message, type) {
   statusEl.textContent = message;
   statusEl.className = 'status' + (type ? ' ' + type : '');
-}
-
-function setRecordingState(isRecording) {
-  captureBtn.disabled = isRecording;
-  stopBtn.disabled = !isRecording;
 }
