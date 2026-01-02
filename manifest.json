@@ -5,7 +5,8 @@
   "description": "Download and play YouTube audio for language learning",
   "permissions": [
     "activeTab",
-    "storage"
+    "storage",
+    "offscreen"
   ],
   "host_permissions": [
     "https://www.youtube.com/*",

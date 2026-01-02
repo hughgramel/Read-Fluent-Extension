@@ -68,65 +68,31 @@ downloadBtn.addEventListener('click', async () => {
     downloadBtn.disabled = true;
     setStatus('Downloading audio...', 'loading');
 
-    // Try multiple API endpoints
-    const apis = [
-      {
-        url: 'https://co.wuk.sh/api/json',
-        body: { url: currentVideoInfo.url, aFormat: 'mp3', isAudioOnly: true }
-      },
-      {
-        url: 'https://api.cobalt.tools/api/json',
-        body: { url: currentVideoInfo.url, aFormat: 'mp3', isAudioOnly: true }
-      }
-    ];
+    // Send to background script which uses offscreen document
+    const response = await chrome.runtime.sendMessage({
+      action: 'downloadAudio',
+      url: currentVideoInfo.url
+    });
 
-    let audioUrl = null;
-    let lastError = null;
+    console.log('Response from background:', response);
 
-    for (const api of apis) {
-      try {
-        console.log('Trying API:', api.url);
-        const response = await fetch(api.url, {
-          method: 'POST',
-          headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(api.body)
-        });
-
-        console.log('Response status:', response.status);
-
-        if (response.ok) {
-          const data = await response.json();
-          console.log('API response:', data);
-
-          if (data.url) {
-            audioUrl = data.url;
-            break;
-          } else if (data.status === 'error') {
-            lastError = data.text;
-          }
-        }
-      } catch (e) {
-        console.error('API error:', e);
-        lastError = e.message;
-      }
+    if (!response) {
+      throw new Error('No response from extension. Try reloading.');
     }
 
-    if (!audioUrl) {
-      throw new Error(lastError || 'Could not get audio URL from any API');
+    if (!response.success) {
+      throw new Error(response.error || 'Download failed');
     }
 
-    setStatus('Fetching audio file...', 'loading');
-    console.log('Fetching audio from:', audioUrl);
-
-    const audioResponse = await fetch(audioUrl);
-    if (!audioResponse.ok) {
-      throw new Error('Failed to download audio file');
+    // Convert base64 to blob
+    const byteCharacters = atob(response.audioData);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
     }
+    const byteArray = new Uint8Array(byteNumbers);
+    currentAudioBlob = new Blob([byteArray], { type: response.mimeType });
 
-    currentAudioBlob = await audioResponse.blob();
     console.log('Got audio blob, size:', currentAudioBlob.size);
 
     if (currentAudioUrl) {
