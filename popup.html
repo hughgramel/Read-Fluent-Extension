@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Read Fluent</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Read Fluent</h1>
+
+    <div id="status" class="status">
+      Ready to capture audio
+    </div>
+
+    <div class="controls">
+      <button id="captureBtn" class="btn btn-primary">
+        Capture Audio
+      </button>
+      <button id="stopBtn" class="btn btn-danger" disabled>
+        Stop Recording
+      </button>
+    </div>
+
+    <div id="audioPlayer" class="audio-player hidden">
+      <h3>Captured Audio</h3>
+      <audio id="audio" controls></audio>
+      <div class="audio-actions">
+        <button id="downloadBtn" class="btn btn-secondary">
+          Download Audio
+        </button>
+        <button id="clearBtn" class="btn btn-secondary">
+          Clear
+        </button>
+      </div>
+    </div>
+
+    <div id="savedAudios" class="saved-audios">
+      <h3>Saved Recordings</h3>
+      <div id="audioList"></div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
