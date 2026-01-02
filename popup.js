@@ -71,74 +71,35 @@ downloadBtn.addEventListener('click', async () => {
     downloadBtn.disabled = true;
     setStatus('Downloading audio...', 'loading');
 
-    // Use cobalt.tools API to get audio
-    const response = await fetch('https://api.cobalt.tools/api/json', {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        url: currentVideoInfo.url,
-        vCodec: 'h264',
-        vQuality: '720',
-        aFormat: 'mp3',
-        isAudioOnly: true,
-        disableMetadata: false
-      })
+    // Send request to background script to avoid CORS
+    const response = await chrome.runtime.sendMessage({
+      action: 'downloadAudio',
+      url: currentVideoInfo.url
     });
 
-    const data = await response.json();
-
-    if (data.status === 'error') {
-      throw new Error(data.text || 'Failed to get audio URL');
+    if (!response.success) {
+      throw new Error(response.error || 'Download failed');
     }
 
-    if (data.status === 'redirect' || data.status === 'stream') {
-      // Fetch the audio file
-      const audioUrl = data.url;
-      setStatus('Fetching audio file...', 'loading');
-
-      const audioResponse = await fetch(audioUrl);
-      if (!audioResponse.ok) {
-        throw new Error('Failed to download audio file');
-      }
-
-      currentAudioBlob = await audioResponse.blob();
-
-      // Create URL and set audio source
-      if (currentAudioUrl) {
-        URL.revokeObjectURL(currentAudioUrl);
-      }
-      currentAudioUrl = URL.createObjectURL(currentAudioBlob);
-      audioEl.src = currentAudioUrl;
-
-      // Show audio player
-      audioPlayer.classList.remove('hidden');
-      setStatus('Audio ready to play!', 'success');
-
-    } else if (data.status === 'picker') {
-      // Multiple formats available, use the first audio one
-      const audioOption = data.picker.find(p => p.type === 'audio') || data.picker[0];
-      if (audioOption && audioOption.url) {
-        setStatus('Fetching audio file...', 'loading');
-        const audioResponse = await fetch(audioOption.url);
-        currentAudioBlob = await audioResponse.blob();
-
-        if (currentAudioUrl) {
-          URL.revokeObjectURL(currentAudioUrl);
-        }
-        currentAudioUrl = URL.createObjectURL(currentAudioBlob);
-        audioEl.src = currentAudioUrl;
-
-        audioPlayer.classList.remove('hidden');
-        setStatus('Audio ready to play!', 'success');
-      } else {
-        throw new Error('No audio format available');
-      }
-    } else {
-      throw new Error('Unexpected response from server');
+    // Convert base64 back to blob
+    const byteCharacters = atob(response.audioData);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
     }
+    const byteArray = new Uint8Array(byteNumbers);
+    currentAudioBlob = new Blob([byteArray], { type: response.mimeType });
+
+    // Create URL and set audio source
+    if (currentAudioUrl) {
+      URL.revokeObjectURL(currentAudioUrl);
+    }
+    currentAudioUrl = URL.createObjectURL(currentAudioBlob);
+    audioEl.src = currentAudioUrl;
+
+    // Show audio player
+    audioPlayer.classList.remove('hidden');
+    setStatus('Audio ready to play!', 'success');
 
   } catch (error) {
     console.error('Download error:', error);
