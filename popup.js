@@ -77,6 +77,12 @@ downloadBtn.addEventListener('click', async () => {
       url: currentVideoInfo.url
     });
 
+    console.log('Got response from background:', response);
+
+    if (!response) {
+      throw new Error('No response from background script. Try reloading the extension.');
+    }
+
     if (!response.success) {
       throw new Error(response.error || 'Download failed');
     }

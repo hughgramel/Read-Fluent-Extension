@@ -6,17 +6,21 @@ chrome.runtime.onInstalled.addListener(() => {
 
 // Listen for messages from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  console.log('Background received message:', request.action);
+
   if (request.action === 'downloadAudio') {
-    downloadAudio(request.url)
-      .then(result => sendResponse(result))
-      .catch(error => sendResponse({ success: false, error: error.message }));
-    return true; // Keep channel open for async response
+    // Handle async operation
+    handleDownload(request.url, sendResponse);
+    return true; // CRITICAL: keeps the message channel open
   }
+
   return false;
 });
 
-async function downloadAudio(videoUrl) {
+async function handleDownload(videoUrl, sendResponse) {
   try {
+    console.log('Starting download for:', videoUrl);
+
     // Use cobalt.tools API
     const response = await fetch('https://api.cobalt.tools/api/json', {
       method: 'POST',
@@ -34,14 +38,21 @@ async function downloadAudio(videoUrl) {
       })
     });
 
+    console.log('API response status:', response.status);
+
     if (!response.ok) {
-      throw new Error(`API request failed: ${response.status}`);
+      const text = await response.text();
+      console.error('API error response:', text);
+      sendResponse({ success: false, error: `API request failed: ${response.status}` });
+      return;
     }
 
     const data = await response.json();
+    console.log('API response data:', data);
 
     if (data.status === 'error') {
-      throw new Error(data.text || 'Failed to get audio URL');
+      sendResponse({ success: false, error: data.text || 'Failed to get audio URL' });
+      return;
     }
 
     let audioUrl = null;
@@ -56,40 +67,40 @@ async function downloadAudio(videoUrl) {
     }
 
     if (!audioUrl) {
-      throw new Error('No audio URL found in response');
+      sendResponse({ success: false, error: 'No audio URL found in response' });
+      return;
     }
+
+    console.log('Fetching audio from:', audioUrl);
 
     // Fetch the actual audio file
     const audioResponse = await fetch(audioUrl);
     if (!audioResponse.ok) {
-      throw new Error('Failed to download audio file');
+      sendResponse({ success: false, error: 'Failed to download audio file' });
+      return;
     }
 
     const audioBlob = await audioResponse.blob();
+    console.log('Audio blob size:', audioBlob.size);
 
     // Convert blob to base64 for sending to popup
-    const base64 = await blobToBase64(audioBlob);
-
-    return {
-      success: true,
-      audioData: base64,
-      mimeType: audioBlob.type || 'audio/mpeg'
-    };
-
-  } catch (error) {
-    console.error('Download error:', error);
-    return { success: false, error: error.message };
-  }
-}
-
-function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => {
       const base64 = reader.result.split(',')[1];
-      resolve(base64);
+      console.log('Sending audio data, length:', base64.length);
+      sendResponse({
+        success: true,
+        audioData: base64,
+        mimeType: audioBlob.type || 'audio/mpeg'
+      });
     };
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
+    reader.onerror = () => {
+      sendResponse({ success: false, error: 'Failed to encode audio' });
+    };
+    reader.readAsDataURL(audioBlob);
+
+  } catch (error) {
+    console.error('Download error:', error);
+    sendResponse({ success: false, error: error.message });
+  }
 }
