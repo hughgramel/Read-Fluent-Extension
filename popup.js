@@ -14,17 +14,8 @@ let currentAudioUrl = null;
 let currentVideoInfo = null;
 
 // Initialize
-document.addEventListener('DOMContentLoaded', async () => {
+document.addEventListener('DOMContentLoaded', () => {
   loadSavedAudios();
-
-  // Test service worker connection
-  try {
-    const ping = await chrome.runtime.sendMessage({ action: 'ping' });
-    console.log('Service worker ping:', ping);
-  } catch (e) {
-    console.error('Service worker not responding:', e);
-  }
-
   checkCurrentTab();
 });
 
@@ -39,7 +30,6 @@ async function checkCurrentTab() {
       return;
     }
 
-    // Extract video ID from URL
     const url = new URL(tab.url);
     const videoId = url.searchParams.get('v');
 
@@ -49,14 +39,12 @@ async function checkCurrentTab() {
       return;
     }
 
-    // Get video title from the tab
     currentVideoInfo = {
       videoId: videoId,
       url: tab.url,
       title: tab.title.replace(' - YouTube', '').trim()
     };
 
-    // Show video info
     videoTitleEl.textContent = currentVideoInfo.title;
     videoInfoEl.classList.remove('hidden');
 
@@ -80,39 +68,73 @@ downloadBtn.addEventListener('click', async () => {
     downloadBtn.disabled = true;
     setStatus('Downloading audio...', 'loading');
 
-    // Send request to background script to avoid CORS
-    const response = await chrome.runtime.sendMessage({
-      action: 'downloadAudio',
-      url: currentVideoInfo.url
-    });
+    // Try multiple API endpoints
+    const apis = [
+      {
+        url: 'https://co.wuk.sh/api/json',
+        body: { url: currentVideoInfo.url, aFormat: 'mp3', isAudioOnly: true }
+      },
+      {
+        url: 'https://api.cobalt.tools/api/json',
+        body: { url: currentVideoInfo.url, aFormat: 'mp3', isAudioOnly: true }
+      }
+    ];
 
-    console.log('Got response from background:', response);
+    let audioUrl = null;
+    let lastError = null;
 
-    if (!response) {
-      throw new Error('No response from background script. Try reloading the extension.');
+    for (const api of apis) {
+      try {
+        console.log('Trying API:', api.url);
+        const response = await fetch(api.url, {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(api.body)
+        });
+
+        console.log('Response status:', response.status);
+
+        if (response.ok) {
+          const data = await response.json();
+          console.log('API response:', data);
+
+          if (data.url) {
+            audioUrl = data.url;
+            break;
+          } else if (data.status === 'error') {
+            lastError = data.text;
+          }
+        }
+      } catch (e) {
+        console.error('API error:', e);
+        lastError = e.message;
+      }
     }
 
-    if (!response.success) {
-      throw new Error(response.error || 'Download failed');
+    if (!audioUrl) {
+      throw new Error(lastError || 'Could not get audio URL from any API');
     }
 
-    // Convert base64 back to blob
-    const byteCharacters = atob(response.audioData);
-    const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) {
-      byteNumbers[i] = byteCharacters.charCodeAt(i);
-    }
-    const byteArray = new Uint8Array(byteNumbers);
-    currentAudioBlob = new Blob([byteArray], { type: response.mimeType });
+    setStatus('Fetching audio file...', 'loading');
+    console.log('Fetching audio from:', audioUrl);
 
-    // Create URL and set audio source
+    const audioResponse = await fetch(audioUrl);
+    if (!audioResponse.ok) {
+      throw new Error('Failed to download audio file');
+    }
+
+    currentAudioBlob = await audioResponse.blob();
+    console.log('Got audio blob, size:', currentAudioBlob.size);
+
     if (currentAudioUrl) {
       URL.revokeObjectURL(currentAudioUrl);
     }
     currentAudioUrl = URL.createObjectURL(currentAudioBlob);
     audioEl.src = currentAudioUrl;
 
-    // Show audio player
     audioPlayer.classList.remove('hidden');
     setStatus('Audio ready to play!', 'success');
 
@@ -128,14 +150,12 @@ downloadBtn.addEventListener('click', async () => {
 saveBtn.addEventListener('click', () => {
   if (!currentAudioBlob || !currentVideoInfo) return;
 
-  // Clean filename
   const cleanTitle = currentVideoInfo.title
     .replace(/[^a-zA-Z0-9\s-]/g, '')
     .replace(/\s+/g, '-')
     .substring(0, 50);
   const filename = `${cleanTitle}.mp3`;
 
-  // Trigger download
   const url = URL.createObjectURL(currentAudioBlob);
   const a = document.createElement('a');
   a.href = url;
@@ -143,7 +163,6 @@ saveBtn.addEventListener('click', () => {
   a.click();
   URL.revokeObjectURL(url);
 
-  // Save to extension storage
   saveAudioToStorage(filename, currentAudioBlob);
 });
 
@@ -178,7 +197,6 @@ async function saveAudioToStorage(filename, blob) {
         date: new Date().toISOString()
       });
 
-      // Keep only last 5 recordings
       if (savedAudios.length > 5) {
         savedAudios.pop();
       }
@@ -192,7 +210,7 @@ async function saveAudioToStorage(filename, blob) {
   }
 }
 
-// Load saved audios from storage
+// Load saved audios
 async function loadSavedAudios() {
   try {
     const result = await chrome.storage.local.get(['savedAudios']);
@@ -216,7 +234,6 @@ async function loadSavedAudios() {
       </div>
     `).join('');
 
-    // Add event listeners
     audioList.querySelectorAll('.play-btn').forEach(btn => {
       btn.addEventListener('click', () => playSavedAudio(btn.dataset.id));
     });
@@ -229,7 +246,7 @@ async function loadSavedAudios() {
   }
 }
 
-// Play a saved audio
+// Play saved audio
 async function playSavedAudio(id) {
   try {
     const result = await chrome.storage.local.get(['savedAudios']);
@@ -259,7 +276,7 @@ async function playSavedAudio(id) {
   }
 }
 
-// Delete a saved audio
+// Delete saved audio
 async function deleteSavedAudio(id) {
   try {
     const result = await chrome.storage.local.get(['savedAudios']);
@@ -271,7 +288,6 @@ async function deleteSavedAudio(id) {
   }
 }
 
-// Helper function
 function setStatus(message, type) {
   statusEl.textContent = message;
   statusEl.className = 'status' + (type ? ' ' + type : '');
